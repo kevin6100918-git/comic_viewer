@@ -372,9 +372,19 @@ class _AdaptivePage extends StatefulWidget {
 }
 
 class _AdaptivePageState extends State<_AdaptivePage> {
+  late final PageController _halfController;
+
+  // Maps showRightHalf → inner PageView page index.
+  // LTR layout: [leftHalf=0, rightHalf=1]; RTL layout: [rightHalf=0, leftHalf=1].
+  int _halfPageIndex(bool showRightHalf) =>
+      widget.isRtl ? (showRightHalf ? 0 : 1) : (showRightHalf ? 1 : 0);
+
   @override
   void initState() {
     super.initState();
+    _halfController = PageController(
+      initialPage: _halfPageIndex(widget.showRightHalf),
+    );
     if (widget.mode == _PageMode.normal) {
       _detectMode();
     }
@@ -387,6 +397,20 @@ class _AdaptivePageState extends State<_AdaptivePage> {
     if (old.imageUrl != widget.imageUrl && widget.mode == _PageMode.normal) {
       _detectMode();
     }
+    // Animate to the new half when the parent flips showRightHalf.
+    if (old.showRightHalf != widget.showRightHalf) {
+      _halfController.animateToPage(
+        _halfPageIndex(widget.showRightHalf),
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeOut,
+      );
+    }
+  }
+
+  @override
+  void dispose() {
+    _halfController.dispose();
+    super.dispose();
   }
 
   Future<void> _detectMode() async {
@@ -494,12 +518,23 @@ class _AdaptivePageState extends State<_AdaptivePage> {
     );
   }
 
-  // Wide image: GestureDetector handles swipes; shows left or right half.
+  // Wide image: GestureDetector handles swipes; animated PageView shows halves.
+  // The inner PageView is purely for animation: physics = Never so it never
+  // intercepts gestures. When the parent flips showRightHalf, didUpdateWidget
+  // calls _halfController.animateToPage() to produce the slide transition.
   Widget _buildWide(Size screen) {
+    final leftHalf = _halfPage(screen, rightHalf: false);
+    final rightHalf = _halfPage(screen, rightHalf: true);
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onHorizontalDragEnd: _handleSwipe,
-      child: _halfPage(screen, rightHalf: widget.showRightHalf),
+      child: PageView(
+        controller: _halfController,
+        physics: const NeverScrollableScrollPhysics(),
+        // reverse mirrors the outer PageView so animation direction matches.
+        reverse: widget.isRtl,
+        children: widget.isRtl ? [rightHalf, leftHalf] : [leftHalf, rightHalf],
+      ),
     );
   }
 
