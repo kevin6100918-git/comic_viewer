@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"f:\\GitHubClone\\Flutter_practice\\comic_viewer\" && git diff --quiet && git diff --cached --quiet || (git add -A && git commit -m \"chore: auto-commit [hook fallback]\")"
+          }
+        ]
+      }
+    ]
+  }
+}
