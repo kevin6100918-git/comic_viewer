@@ -1,0 +1,173 @@
+openapi: 3.1.0
+info:
+  title: Private Cloud Storage API
+  version: 1.0.0
+
+components:
+  securitySchemes:
+    LineAccessToken:
+      type: apiKey
+      in: cookie
+      name: Authorization
+      description: LINE access token，格式為 `Bearer <token>`
+
+  schemas:
+    FileEntry:
+      type: object
+      properties:
+        name:
+          type: string
+          description: 檔案或資料夾名稱
+          example: "photo.jpg"
+        updated:
+          type: string
+          description: 最後修改時間，格式為 `YYYY-MM-DD HH:MM:SS`
+          example: "2026-06-09 14:30:00"
+        type:
+          type: string
+          description: 檔案類型
+          enum:
+            - image
+            - video
+            - audio
+            - document
+            - archive
+            - code
+            - executable
+            - font
+            - folder
+            - other
+          example: "image"
+      required:
+        - name
+        - updated
+        - type
+
+    ErrorUnauthorized:
+      type: object
+      properties:
+        message:
+          type: string
+          example: "Unauthorized"
+      required:
+        - message
+
+paths:
+  /api/cloud-drive/folder:
+    get:
+      summary: 列出資料夾內容
+      description: |
+        列出指定路徑下的所有檔案與子資料夾，可指定排序欄位與方向。
+        路徑參數須為 URL encode 的字串。
+      operationId: list_dir
+      security:
+        - LineAccessToken: []
+      parameters:
+        - name: path
+          in: query
+          required: true
+          description: |
+            目標資料夾路徑（URL encoded），以 `/` 分隔各層級。
+            根目錄請傳空字串 `""`。
+          schema:
+            type: string
+          example: "photos%2F2026"
+        - name: sortingVote
+          in: query
+          required: true
+          description: |
+            排序依據欄位。
+            - `name`：依名稱排序
+            - `updated`：依修改時間排序
+            - `type`：依檔案類型排序
+          schema:
+            type: string
+            enum:
+              - name
+              - updated
+              - type
+          example: "name"
+        - name: sortingMethod
+          in: query
+          required: true
+          description: |
+            排序方向。
+            - `ASC`：遞增
+            - `DESC`：遞減
+          schema:
+            type: string
+            enum:
+              - ASC
+              - DESC
+          example: "ASC"
+      responses:
+        "200":
+          description: 成功回傳資料夾內容列表
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/FileEntry"
+              example:
+                - name: "documents"
+                  updated: "2026-06-01 10:00:00"
+                  type: "folder"
+                - name: "photo.jpg"
+                  updated: "2026-06-09 14:30:00"
+                  type: "image"
+                - name: "report.pdf"
+                  updated: "2026-05-20 09:15:00"
+                  type: "document"
+        "401":
+          description: 未授權，Access Token 無效或不存在
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorUnauthorized"
+
+  /cloud-drive/image:
+    get:
+      summary: 取得圖片
+      description: |
+        讀取指定路徑的圖片檔案並以 `image/png` 格式回傳。
+        回應包含長效快取標頭（7 天），適合直接嵌入 `<img src="...">` 使用。
+        路徑與檔名參數均須為 URL encode 的字串。
+      operationId: get_image
+      security:
+        - LineAccessToken: []
+      parameters:
+        - name: path
+          in: query
+          required: true
+          description: 圖片所在資料夾路徑（URL encoded），以 `/` 分隔各層級。
+          schema:
+            type: string
+          example: "photos%2F2026"
+        - name: file
+          in: query
+          required: true
+          description: 圖片檔名（URL encoded）。
+          schema:
+            type: string
+          example: "photo.jpg"
+      responses:
+        "200":
+          description: 成功回傳圖片二進位內容
+          headers:
+            Cache-Control:
+              description: 快取策略，固定為 `public, max-age=604800, immutable`（7 天）
+              schema:
+                type: string
+                example: "public, max-age=604800, immutable"
+          content:
+            image/png:
+              schema:
+                type: string
+                format: binary
+        "401":
+          description: 未授權，Access Token 無效或不存在
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorUnauthorized"
