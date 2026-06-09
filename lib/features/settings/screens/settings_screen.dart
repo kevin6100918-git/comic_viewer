@@ -39,6 +39,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final themeMode = ref.watch(themeModeProvider);
     final colorIndex = ref.watch(themeColorIndexProvider);
     final isRtl = ref.watch(readingRtlProvider);
+    final autoNext = ref.watch(autoNextBookProvider);
 
     return Scaffold(
       appBar: AppBar(title: const Text('設定')),
@@ -180,6 +181,20 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 .textTheme
                 .bodySmall
                 ?.copyWith(color: Colors.grey),
+          ),
+
+          const SizedBox(height: 28),
+
+          // ── Auto Next Book ──────────────────────────────────────────
+          _SectionTitle('閱讀行為'),
+          const SizedBox(height: 4),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('自動接續下一本'),
+            subtitle: const Text('讀完最後一頁後滑動可前往同資料夾的下一本'),
+            value: autoNext,
+            onChanged: (v) =>
+                ref.read(autoNextBookProvider.notifier).set(v),
           ),
         ],
       ),

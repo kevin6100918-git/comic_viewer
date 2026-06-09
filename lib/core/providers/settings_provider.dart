@@ -119,6 +119,28 @@ final readingRtlProvider =
   return ReadingRtlNotifier(prefs);
 });
 
+// ── Auto Next Book ────────────────────────────────────────────────────────────
+
+const _kAutoNextBookKey = 'auto_next_book';
+
+class AutoNextBookNotifier extends StateNotifier<bool> {
+  final SharedPreferences _prefs;
+
+  AutoNextBookNotifier(this._prefs)
+      : super(_prefs.getBool(_kAutoNextBookKey) ?? true);
+
+  Future<void> set(bool value) async {
+    state = value;
+    await _prefs.setBool(_kAutoNextBookKey, value);
+  }
+}
+
+final autoNextBookProvider =
+    StateNotifierProvider<AutoNextBookNotifier, bool>((ref) {
+  final prefs = ref.watch(sharedPreferencesProvider);
+  return AutoNextBookNotifier(prefs);
+});
+
 // ── Sort Settings ─────────────────────────────────────────────────────────────
 
 class SortSettings {
