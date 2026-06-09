@@ -3,26 +3,38 @@ import '../../../core/api/api_client.dart';
 import '../../../core/models/file_entry.dart';
 import '../../../core/providers/api_client_provider.dart';
 
-// Recursively drills into the first sub-folder until an image is found.
-// Returns null if no image exists anywhere under the given path.
+// Returns the first image URL from the most recently modified child folder.
+// Falls back to the first image found directly in the folder if no child folders exist.
 final coverUrlProvider =
     FutureProvider.family<String?, List<String>>((ref, pathSegments) {
   final client = ref.watch(apiClientProvider);
-  return _findFirstImageUrl(client, pathSegments);
+  return _coverUrl(client, pathSegments);
 });
 
-Future<String?> _findFirstImageUrl(
+Future<String?> _coverUrl(
     ApiClient client, List<String> pathSegments) async {
   final entries = await client.listFolder(pathSegments);
 
-  final images = entries.where((e) => e.type == FileType.image).toList();
-  if (images.isNotEmpty) {
-    return client.imageUrl(pathSegments, images.first.name);
+  final folders = entries
+      .where((e) => e.type == FileType.folder)
+      .toList()
+    ..sort((a, b) => b.updated.compareTo(a.updated)); // most recent first
+
+  if (folders.isNotEmpty) {
+    final bookPath = [...pathSegments, folders.first.name];
+    final bookEntries = await client.listFolder(bookPath);
+    final images = bookEntries
+        .where((e) => e.type == FileType.image)
+        .toList();
+    if (images.isNotEmpty) {
+      return client.imageUrl(bookPath, images.first.name);
+    }
   }
 
-  final folders = entries.where((e) => e.type == FileType.folder).toList();
-  if (folders.isNotEmpty) {
-    return _findFirstImageUrl(client, [...pathSegments, folders.first.name]);
+  // Fallback: images sitting directly in this folder
+  final directImages = entries.where((e) => e.type == FileType.image).toList();
+  if (directImages.isNotEmpty) {
+    return client.imageUrl(pathSegments, directImages.first.name);
   }
 
   return null;
