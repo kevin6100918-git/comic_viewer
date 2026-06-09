@@ -8,7 +8,7 @@ import '../../../core/providers/api_client_provider.dart';
 import '../../../core/providers/bookmark_provider.dart';
 import '../../../core/providers/history_provider.dart';
 import '../../../core/providers/settings_provider.dart';
-import '../../browser/providers/folder_provider.dart';
+import '../../browser/providers/folder_provider.dart' show readerFolderProvider;
 
 class ReaderScreen extends ConsumerWidget {
   final List<String> pathSegments;
@@ -24,7 +24,7 @@ class ReaderScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final folderAsync = ref.watch(folderProvider(pathSegments));
+    final folderAsync = ref.watch(readerFolderProvider(pathSegments));
 
     return Scaffold(
       appBar: AppBar(title: Text(title)),
@@ -39,7 +39,7 @@ class ReaderScreen extends ConsumerWidget {
             pathSegments: pathSegments,
             title: title,
             images: images,
-            initialPage: initialPage.clamp(0, images.length - 1),
+            initialPage: initialPage.clamp(0, images.length - 1).toInt(),
           );
         },
         loading: () => const Center(child: CircularProgressIndicator()),
