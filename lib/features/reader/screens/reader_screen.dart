@@ -80,6 +80,11 @@ class _PageReaderState extends ConsumerState<_PageReader> {
   late final PageController _controller;
   late int _currentPage;
 
+  // Detected modes and wide-image half states, keyed by real image index.
+  final Map<int, _PageMode> _modes = {};
+  // true = showing right half, false = showing left half.
+  final Map<int, bool> _rightHalf = {};
+
   List<String>? _nextBookPath;
   String? _nextBookTitle;
   bool _nextNavPending = false;
@@ -160,6 +165,24 @@ class _PageReaderState extends ConsumerState<_PageReader> {
     }
   }
 
+  // ── Wide-image half control ────────────────────────────────────────────────
+
+  void _onModeDetected(int index, _PageMode mode, bool isRtl) {
+    if (!mounted) return;
+    setState(() {
+      _modes[index] = mode;
+      // Initialize half-state only once per image.
+      if (mode == _PageMode.wide && !_rightHalf.containsKey(index)) {
+        // RTL reading starts on the right half; LTR on the left.
+        _rightHalf[index] = isRtl;
+      }
+    });
+  }
+
+  void _toggleHalf(int index) {
+    if (mounted) setState(() => _rightHalf[index] = !(_rightHalf[index] ?? false));
+  }
+
   // ── Navigation ─────────────────────────────────────────────────────────────
 
   void _navigateToNextBook() {
@@ -226,11 +249,21 @@ class _PageReaderState extends ConsumerState<_PageReader> {
     final hasNextPage = autoNext && _nextBookPath != null;
     final pageCount = widget.images.length + (hasNextPage ? 1 : 0);
 
+    // Disable user-driven page swiping while on a wide-image page.
+    // The GestureDetector inside _AdaptivePage handles swipes for wide images
+    // and calls _controller.nextPage/previousPage programmatically.
+    // Programmatic animations bypass ScrollPhysics, so they still work.
+    final currentMode = _modes[_currentPage] ?? _PageMode.normal;
+    final physics = currentMode == _PageMode.wide
+        ? const NeverScrollableScrollPhysics()
+        : const PageScrollPhysics();
+
     return Stack(
       children: [
         PageView.builder(
           controller: _controller,
           reverse: isRtl,
+          physics: physics,
           itemCount: pageCount,
           onPageChanged: _onPageChanged,
           itemBuilder: (context, index) {
@@ -241,7 +274,24 @@ class _PageReaderState extends ConsumerState<_PageReader> {
               widget.pathSegments,
               widget.images[index].name,
             );
-            return _AdaptivePage(imageUrl: url, isRtl: isRtl);
+            final mode = _modes[index] ?? _PageMode.normal;
+            final showRight = _rightHalf[index] ?? isRtl;
+            return _AdaptivePage(
+              imageUrl: url,
+              isRtl: isRtl,
+              mode: mode,
+              showRightHalf: showRight,
+              onModeDetected: (m) => _onModeDetected(index, m, isRtl),
+              onToggleHalf: () => _toggleHalf(index),
+              onNext: () => _controller.nextPage(
+                duration: const Duration(milliseconds: 300),
+                curve: Curves.easeOut,
+              ),
+              onPrevious: () => _controller.previousPage(
+                duration: const Duration(milliseconds: 300),
+                curve: Curves.easeOut,
+              ),
+            );
           },
         ),
         if (_currentPage < widget.images.length)
@@ -287,29 +337,56 @@ class _PageReaderState extends ConsumerState<_PageReader> {
 
 // ── _AdaptivePage ─────────────────────────────────────────────────────────────
 //
-// Detects image dimensions via CachedNetworkImageProvider after the image
-// is loaded into the cache, then renders in the appropriate mode:
-//   tall   (h > 2w)  → vertically scrollable, fits screen width
-//   wide   (w > h)   → inner PageView with left / right halves
-//   normal           → InteractiveViewer with BoxFit.contain
+// Detects image aspect ratio after load, then renders accordingly:
+//   normal  → InteractiveViewer + BoxFit.contain
+//   tall    → SingleChildScrollView + fitWidth (vertically scrollable)
+//   wide    → half-page view controlled by parent; swipes handled here
+//
+// For wide images, the outer PageView uses NeverScrollableScrollPhysics.
+// This widget's GestureDetector intercepts horizontal swipes and either
+// toggles halves or calls onNext/onPrevious to advance the outer controller.
 
 class _AdaptivePage extends StatefulWidget {
   final String imageUrl;
   final bool isRtl;
+  final _PageMode mode;
+  final bool showRightHalf;
+  final void Function(_PageMode) onModeDetected;
+  final VoidCallback onToggleHalf;
+  final VoidCallback onNext;
+  final VoidCallback onPrevious;
 
-  const _AdaptivePage({required this.imageUrl, required this.isRtl});
+  const _AdaptivePage({
+    required this.imageUrl,
+    required this.isRtl,
+    required this.mode,
+    required this.showRightHalf,
+    required this.onModeDetected,
+    required this.onToggleHalf,
+    required this.onNext,
+    required this.onPrevious,
+  });
 
   @override
   State<_AdaptivePage> createState() => _AdaptivePageState();
 }
 
 class _AdaptivePageState extends State<_AdaptivePage> {
-  _PageMode _mode = _PageMode.normal;
-
   @override
   void initState() {
     super.initState();
-    _detectMode();
+    if (widget.mode == _PageMode.normal) {
+      _detectMode();
+    }
+  }
+
+  @override
+  void didUpdateWidget(_AdaptivePage old) {
+    super.didUpdateWidget(old);
+    // Re-detect if the URL changed (shouldn't happen, but be safe).
+    if (old.imageUrl != widget.imageUrl && widget.mode == _PageMode.normal) {
+      _detectMode();
+    }
   }
 
   Future<void> _detectMode() async {
@@ -342,23 +419,48 @@ class _AdaptivePageState extends State<_AdaptivePage> {
               ? _PageMode.wide
               : _PageMode.normal;
 
-      if (mode != _mode) setState(() => _mode = mode);
+      widget.onModeDetected(mode);
     } catch (_) {
-      // Keep normal mode on error
+      // Keep normal mode on detection failure
     }
   }
 
+  // ── Swipe handling for wide images ─────────────────────────────────────────
+
+  void _handleSwipe(DragEndDetails details) {
+    final v = details.primaryVelocity ?? 0;
+    if (v.abs() < 200) return;
+
+    // In LTR: negative velocity (swipe left) = forward.
+    // In RTL: positive velocity (swipe right) = forward.
+    final goForward = widget.isRtl ? v > 0 : v < 0;
+
+    // "Forward boundary" = the half you reach LAST before leaving this image.
+    // LTR: right half is last → atForwardEnd when showRightHalf == true.
+    // RTL: left half is last → atForwardEnd when showRightHalf == false.
+    final atForwardEnd =
+        widget.isRtl ? !widget.showRightHalf : widget.showRightHalf;
+    final atBackwardEnd =
+        widget.isRtl ? widget.showRightHalf : !widget.showRightHalf;
+
+    if (goForward) {
+      atForwardEnd ? widget.onNext() : widget.onToggleHalf();
+    } else {
+      atBackwardEnd ? widget.onPrevious() : widget.onToggleHalf();
+    }
+  }
+
+  // ── Build ──────────────────────────────────────────────────────────────────
+
   @override
   Widget build(BuildContext context) {
-    final screenSize = MediaQuery.of(context).size;
-    return switch (_mode) {
-      _PageMode.tall => _buildTall(screenSize),
-      _PageMode.wide => _buildWide(screenSize),
+    final screen = MediaQuery.of(context).size;
+    return switch (widget.mode) {
+      _PageMode.tall => _buildTall(screen),
+      _PageMode.wide => _buildWide(screen),
       _PageMode.normal => _buildNormal(),
     };
   }
-
-  // ── Renderers ──────────────────────────────────────────────────────────────
 
   Widget _buildNormal() {
     return InteractiveViewer(
@@ -375,7 +477,6 @@ class _AdaptivePageState extends State<_AdaptivePage> {
     );
   }
 
-  // Tall image: fits screen width and scrolls vertically.
   Widget _buildTall(Size screen) {
     return SingleChildScrollView(
       physics: const ClampingScrollPhysics(),
@@ -393,37 +494,37 @@ class _AdaptivePageState extends State<_AdaptivePage> {
     );
   }
 
-  // Wide image: inner horizontal PageView showing left half then right half.
-  // In RTL mode the right half is shown first (right page = first in RTL).
-  // Flutter's PageScrollPhysics releases the gesture to the outer PageView
-  // when this inner PageView reaches its boundary.
+  // Wide image: GestureDetector handles swipes; shows left or right half.
   Widget _buildWide(Size screen) {
-    final left = _halfPage(screen, rightHalf: false);
-    final right = _halfPage(screen, rightHalf: true);
-    return PageView(
-      children: widget.isRtl ? [right, left] : [left, right],
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onHorizontalDragEnd: _handleSwipe,
+      child: _halfPage(screen, rightHalf: widget.showRightHalf),
     );
   }
 
-  // Renders one half of a wide image by doubling the SizedBox width and
-  // using Align(widthFactor: 0.5) to clip to the correct half.
+  // Renders one half of a wide image.
+  //
+  // OverflowBox lets the child exceed parent constraints (screen.width).
+  // Setting maxWidth to 2× screen allows the image to render at full double
+  // width. Alignment pins the child to the left or right edge, so ClipRect
+  // clips the opposite half away.
   Widget _halfPage(Size screen, {required bool rightHalf}) {
     return ClipRect(
-      child: Align(
+      child: OverflowBox(
+        maxWidth: screen.width * 2,
+        minWidth: 0,
         alignment:
             rightHalf ? Alignment.centerRight : Alignment.centerLeft,
-        widthFactor: 0.5,
-        child: SizedBox(
+        child: CachedNetworkImage(
+          imageUrl: widget.imageUrl,
           width: screen.width * 2,
-          child: CachedNetworkImage(
-            imageUrl: widget.imageUrl,
-            fit: BoxFit.fitWidth,
-            placeholder: (_, _) =>
-                const Center(child: CircularProgressIndicator()),
-            errorWidget: (_, _, _) => const Center(
-              child: Icon(Icons.broken_image_outlined,
-                  size: 64, color: Colors.grey),
-            ),
+          fit: BoxFit.fitWidth,
+          placeholder: (_, _) =>
+              const Center(child: CircularProgressIndicator()),
+          errorWidget: (_, _, _) => const Center(
+            child: Icon(Icons.broken_image_outlined,
+                size: 64, color: Colors.grey),
           ),
         ),
       ),
