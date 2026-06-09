@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -9,6 +11,12 @@ import '../../../core/providers/bookmark_provider.dart';
 import '../../../core/providers/history_provider.dart';
 import '../../../core/providers/settings_provider.dart';
 import '../../browser/providers/folder_provider.dart';
+
+// ── Enums ─────────────────────────────────────────────────────────────────────
+
+enum _PageMode { normal, tall, wide }
+
+// ── ReaderScreen ──────────────────────────────────────────────────────────────
 
 class ReaderScreen extends ConsumerWidget {
   final List<String> pathSegments;
@@ -49,6 +57,8 @@ class ReaderScreen extends ConsumerWidget {
   }
 }
 
+// ── _PageReader ───────────────────────────────────────────────────────────────
+
 class _PageReader extends ConsumerStatefulWidget {
   final List<String> pathSegments;
   final String title;
@@ -70,13 +80,11 @@ class _PageReaderState extends ConsumerState<_PageReader> {
   late final PageController _controller;
   late int _currentPage;
 
-  // Next-book state: populated async after init
   List<String>? _nextBookPath;
   String? _nextBookTitle;
   bool _nextNavPending = false;
 
   String get _bookId => widget.pathSegments.join('/');
-
   List<String> get _parentPath =>
       widget.pathSegments.sublist(0, widget.pathSegments.length - 1);
 
@@ -97,7 +105,7 @@ class _PageReaderState extends ConsumerState<_PageReader> {
     super.dispose();
   }
 
-  // ── Next book lookup ───────────────────────────────────────────────────────
+  // ── Next book ──────────────────────────────────────────────────────────────
 
   Future<void> _loadNextBookPath() async {
     if (_parentPath.isEmpty) return;
@@ -122,7 +130,6 @@ class _PageReaderState extends ConsumerState<_PageReader> {
   // ── Page events ────────────────────────────────────────────────────────────
 
   void _onPageChanged(int index) {
-    // index == images.length is the "next book" transition page
     if (index >= widget.images.length) {
       if (!_nextNavPending) {
         _nextNavPending = true;
@@ -139,7 +146,6 @@ class _PageReaderState extends ConsumerState<_PageReader> {
   void _preloadAdjacent(int page) {
     final isRtl = ref.read(readingRtlProvider);
     final client = ref.read(apiClientProvider);
-    // In RTL mode PageView is reversed: visual "next" = lower index.
     final nextIdx = isRtl ? page - 1 : page + 1;
     final prevIdx = isRtl ? page + 1 : page - 1;
     for (final idx in [nextIdx, prevIdx]) {
@@ -235,21 +241,9 @@ class _PageReaderState extends ConsumerState<_PageReader> {
               widget.pathSegments,
               widget.images[index].name,
             );
-            return InteractiveViewer(
-              child: CachedNetworkImage(
-                imageUrl: url,
-                fit: BoxFit.contain,
-                placeholder: (_, _) =>
-                    const Center(child: CircularProgressIndicator()),
-                errorWidget: (_, _, _) => const Center(
-                  child: Icon(Icons.broken_image_outlined,
-                      size: 64, color: Colors.grey),
-                ),
-              ),
-            );
+            return _AdaptivePage(imageUrl: url, isRtl: isRtl);
           },
         ),
-        // Page counter (only shown for real image pages)
         if (_currentPage < widget.images.length)
           Positioned(
             bottom: 16,
@@ -270,7 +264,6 @@ class _PageReaderState extends ConsumerState<_PageReader> {
               ),
             ),
           ),
-        // Bookmark button
         Positioned(
           bottom: 12,
           right: 16,
@@ -292,7 +285,153 @@ class _PageReaderState extends ConsumerState<_PageReader> {
   }
 }
 
-// ── Transition page shown while navigating to next book ──────────────────────
+// ── _AdaptivePage ─────────────────────────────────────────────────────────────
+//
+// Detects image dimensions via CachedNetworkImageProvider after the image
+// is loaded into the cache, then renders in the appropriate mode:
+//   tall   (h > 2w)  → vertically scrollable, fits screen width
+//   wide   (w > h)   → inner PageView with left / right halves
+//   normal           → InteractiveViewer with BoxFit.contain
+
+class _AdaptivePage extends StatefulWidget {
+  final String imageUrl;
+  final bool isRtl;
+
+  const _AdaptivePage({required this.imageUrl, required this.isRtl});
+
+  @override
+  State<_AdaptivePage> createState() => _AdaptivePageState();
+}
+
+class _AdaptivePageState extends State<_AdaptivePage> {
+  _PageMode _mode = _PageMode.normal;
+
+  @override
+  void initState() {
+    super.initState();
+    _detectMode();
+  }
+
+  Future<void> _detectMode() async {
+    try {
+      final provider = CachedNetworkImageProvider(widget.imageUrl);
+      final stream = provider.resolve(const ImageConfiguration());
+      final completer = Completer<(int, int)>();
+
+      late final ImageStreamListener listener;
+      listener = ImageStreamListener(
+        (info, _) {
+          if (!completer.isCompleted) {
+            completer.complete((info.image.width, info.image.height));
+          }
+          stream.removeListener(listener);
+        },
+        onError: (e, st) {
+          if (!completer.isCompleted) completer.completeError(e, st);
+          stream.removeListener(listener);
+        },
+      );
+      stream.addListener(listener);
+
+      final (w, h) = await completer.future;
+      if (!mounted) return;
+
+      final mode = h > w * 2
+          ? _PageMode.tall
+          : w > h
+              ? _PageMode.wide
+              : _PageMode.normal;
+
+      if (mode != _mode) setState(() => _mode = mode);
+    } catch (_) {
+      // Keep normal mode on error
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final screenSize = MediaQuery.of(context).size;
+    return switch (_mode) {
+      _PageMode.tall => _buildTall(screenSize),
+      _PageMode.wide => _buildWide(screenSize),
+      _PageMode.normal => _buildNormal(),
+    };
+  }
+
+  // ── Renderers ──────────────────────────────────────────────────────────────
+
+  Widget _buildNormal() {
+    return InteractiveViewer(
+      child: CachedNetworkImage(
+        imageUrl: widget.imageUrl,
+        fit: BoxFit.contain,
+        placeholder: (_, _) =>
+            const Center(child: CircularProgressIndicator()),
+        errorWidget: (_, _, _) => const Center(
+          child: Icon(Icons.broken_image_outlined,
+              size: 64, color: Colors.grey),
+        ),
+      ),
+    );
+  }
+
+  // Tall image: fits screen width and scrolls vertically.
+  Widget _buildTall(Size screen) {
+    return SingleChildScrollView(
+      physics: const ClampingScrollPhysics(),
+      child: CachedNetworkImage(
+        imageUrl: widget.imageUrl,
+        width: screen.width,
+        fit: BoxFit.fitWidth,
+        placeholder: (_, _) =>
+            const Center(child: CircularProgressIndicator()),
+        errorWidget: (_, _, _) => const Center(
+          child: Icon(Icons.broken_image_outlined,
+              size: 64, color: Colors.grey),
+        ),
+      ),
+    );
+  }
+
+  // Wide image: inner horizontal PageView showing left half then right half.
+  // In RTL mode the right half is shown first (right page = first in RTL).
+  // Flutter's PageScrollPhysics releases the gesture to the outer PageView
+  // when this inner PageView reaches its boundary.
+  Widget _buildWide(Size screen) {
+    final left = _halfPage(screen, rightHalf: false);
+    final right = _halfPage(screen, rightHalf: true);
+    return PageView(
+      children: widget.isRtl ? [right, left] : [left, right],
+    );
+  }
+
+  // Renders one half of a wide image by doubling the SizedBox width and
+  // using Align(widthFactor: 0.5) to clip to the correct half.
+  Widget _halfPage(Size screen, {required bool rightHalf}) {
+    return ClipRect(
+      child: Align(
+        alignment:
+            rightHalf ? Alignment.centerRight : Alignment.centerLeft,
+        widthFactor: 0.5,
+        child: SizedBox(
+          width: screen.width * 2,
+          child: CachedNetworkImage(
+            imageUrl: widget.imageUrl,
+            fit: BoxFit.fitWidth,
+            placeholder: (_, _) =>
+                const Center(child: CircularProgressIndicator()),
+            errorWidget: (_, _, _) => const Center(
+              child: Icon(Icons.broken_image_outlined,
+                  size: 64, color: Colors.grey),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ── _NextBookPage ─────────────────────────────────────────────────────────────
 
 class _NextBookPage extends StatelessWidget {
   final String? title;
