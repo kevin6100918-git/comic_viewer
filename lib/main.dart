@@ -17,15 +17,27 @@ void main() async {
   );
 }
 
-class ComicViewerApp extends StatelessWidget {
+class ComicViewerApp extends ConsumerWidget {
   const ComicViewerApp({super.key});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final themeMode = ref.watch(themeModeProvider);
+    final colorIndex = ref.watch(themeColorIndexProvider);
+    final seedColor = kThemeColors[colorIndex].color;
+
     return MaterialApp(
       title: '漫畫書櫃',
+      themeMode: themeMode,
       theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo),
+        colorScheme: ColorScheme.fromSeed(seedColor: seedColor),
+        useMaterial3: true,
+      ),
+      darkTheme: ThemeData(
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: seedColor,
+          brightness: Brightness.dark,
+        ),
         useMaterial3: true,
       ),
       home: const FolderBrowserScreen(
