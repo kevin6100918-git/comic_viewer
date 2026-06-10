@@ -491,27 +491,68 @@ class _AdaptivePageState extends State<_AdaptivePage> {
     );
   }
 
-  // Wide image: inner PageView with PageScrollPhysics lets the half-pages
-  // track the finger during a drag, just like a normal page turn.
-  // Children are always [leftHalf, rightHalf] (page 0 / page 1).
-  // onPageChanged keeps the parent's showRightHalf in sync.
-  // At the boundary, OverscrollNotification fires with non-zero velocity;
-  // we map that to onNext/onPrevious on the outer controller.
+  // Wide image: GestureDetector drives the inner PageView manually so that
+  // the half-pages track the finger in real time.
   //
-  // Velocity sign in a non-reversed horizontal PageView:
-  //   velocity > 0 → right boundary (user flung left)  → forward in LTR
-  //   velocity < 0 → left boundary  (user flung right) → forward in RTL
+  // onHorizontalDragUpdate calls jumpTo to move the scroll position
+  // synchronously with the finger.  onHorizontalDragEnd either:
+  //   • snaps to the nearest half via animateToPage, or
+  //   • calls onNext/onPrevious when the fling goes past the boundary.
+  //
+  // Inner PageView uses NeverScrollableScrollPhysics so it never intercepts
+  // gestures — all input is routed through the GestureDetector.
+  // onPageChanged keeps the parent's showRightHalf in sync after snaps.
+  //
+  // GestureDetector.primaryVelocity sign (finger velocity):
+  //   v > 0 → finger moved RIGHT (swiped right)
+  //   v < 0 → finger moved LEFT  (swiped left)
+  // Boundary logic:
+  //   at page 0 + swipe right (v > 0): LTR → previous, RTL → next
+  //   at page 1 + swipe left  (v < 0): LTR → next,     RTL → previous
   Widget _buildWide(Size screen) {
-    return NotificationListener<OverscrollNotification>(
-      onNotification: (n) {
-        if (n.velocity.abs() < 100) return true;
-        final goForward = widget.isRtl ? n.velocity < 0 : n.velocity > 0;
-        goForward ? widget.onNext() : widget.onPrevious();
-        return true;
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onHorizontalDragUpdate: (d) {
+        if (!_halfController.hasClients) return;
+        final newOffset = (_halfController.offset - d.delta.dx).clamp(
+          _halfController.position.minScrollExtent,
+          _halfController.position.maxScrollExtent,
+        );
+        _halfController.jumpTo(newOffset);
+      },
+      onHorizontalDragEnd: (d) {
+        final v = d.primaryVelocity ?? 0;
+        if (!_halfController.hasClients) return;
+        final pos = _halfController.position;
+
+        // Boundary: fling right at page-0 or fling left at page-1
+        if (v > 200 && pos.pixels <= pos.minScrollExtent + 1) {
+          widget.isRtl ? widget.onNext() : widget.onPrevious();
+          return;
+        }
+        if (v < -200 && pos.pixels >= pos.maxScrollExtent - 1) {
+          widget.isRtl ? widget.onPrevious() : widget.onNext();
+          return;
+        }
+
+        // Snap to nearest page
+        final int target;
+        if (v < -200) {
+          target = 1;
+        } else if (v > 200) {
+          target = 0;
+        } else {
+          target = (pos.pixels / pos.viewportDimension).round().clamp(0, 1);
+        }
+        _halfController.animateToPage(
+          target,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
       },
       child: PageView(
         controller: _halfController,
-        physics: const PageScrollPhysics(),
+        physics: const NeverScrollableScrollPhysics(),
         onPageChanged: (page) => widget.onHalfChanged(page == 1),
         children: [
           _halfPage(screen, rightHalf: false),
