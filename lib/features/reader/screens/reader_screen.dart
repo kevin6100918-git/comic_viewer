@@ -179,10 +179,6 @@ class _PageReaderState extends ConsumerState<_PageReader> {
     });
   }
 
-  void _toggleHalf(int index) {
-    if (mounted) setState(() => _rightHalf[index] = !(_rightHalf[index] ?? false));
-  }
-
   // ── Navigation ─────────────────────────────────────────────────────────────
 
   void _navigateToNextBook() {
@@ -282,7 +278,9 @@ class _PageReaderState extends ConsumerState<_PageReader> {
               mode: mode,
               showRightHalf: showRight,
               onModeDetected: (m) => _onModeDetected(index, m, isRtl),
-              onToggleHalf: () => _toggleHalf(index),
+              onHalfChanged: (v) {
+                if (mounted) setState(() => _rightHalf[index] = v);
+              },
               onNext: () => _controller.nextPage(
                 duration: const Duration(milliseconds: 300),
                 curve: Curves.easeOut,
@@ -340,11 +338,12 @@ class _PageReaderState extends ConsumerState<_PageReader> {
 // Detects image aspect ratio after load, then renders accordingly:
 //   normal  → InteractiveViewer + BoxFit.contain
 //   tall    → SingleChildScrollView + fitWidth (vertically scrollable)
-//   wide    → half-page view controlled by parent; swipes handled here
+//   wide    → inner PageView with PageScrollPhysics lets the finger track the
+//             content; OverscrollNotification at the boundary triggers the
+//             outer controller via onNext/onPrevious.
 //
-// For wide images, the outer PageView uses NeverScrollableScrollPhysics.
-// This widget's GestureDetector intercepts horizontal swipes and either
-// toggles halves or calls onNext/onPrevious to advance the outer controller.
+// The outer PageView uses NeverScrollableScrollPhysics while on a wide page
+// so all gestures go to the inner PageView.
 
 class _AdaptivePage extends StatefulWidget {
   final String imageUrl;
@@ -352,7 +351,8 @@ class _AdaptivePage extends StatefulWidget {
   final _PageMode mode;
   final bool showRightHalf;
   final void Function(_PageMode) onModeDetected;
-  final VoidCallback onToggleHalf;
+  // Called when the inner PageView settles on a new half.
+  final void Function(bool showRightHalf) onHalfChanged;
   final VoidCallback onNext;
   final VoidCallback onPrevious;
 
@@ -362,7 +362,7 @@ class _AdaptivePage extends StatefulWidget {
     required this.mode,
     required this.showRightHalf,
     required this.onModeDetected,
-    required this.onToggleHalf,
+    required this.onHalfChanged,
     required this.onNext,
     required this.onPrevious,
   });
@@ -374,10 +374,8 @@ class _AdaptivePage extends StatefulWidget {
 class _AdaptivePageState extends State<_AdaptivePage> {
   late final PageController _halfController;
 
-  // Maps showRightHalf → inner PageView page index.
-  // LTR layout: [leftHalf=0, rightHalf=1]; RTL layout: [rightHalf=0, leftHalf=1].
-  int _halfPageIndex(bool showRightHalf) =>
-      widget.isRtl ? (showRightHalf ? 0 : 1) : (showRightHalf ? 1 : 0);
+  // Inner PageView always has page 0 = left half, page 1 = right half.
+  int _halfPageIndex(bool showRightHalf) => showRightHalf ? 1 : 0;
 
   @override
   void initState() {
@@ -449,31 +447,6 @@ class _AdaptivePageState extends State<_AdaptivePage> {
     }
   }
 
-  // ── Swipe handling for wide images ─────────────────────────────────────────
-
-  void _handleSwipe(DragEndDetails details) {
-    final v = details.primaryVelocity ?? 0;
-    if (v.abs() < 200) return;
-
-    // In LTR: negative velocity (swipe left) = forward.
-    // In RTL: positive velocity (swipe right) = forward.
-    final goForward = widget.isRtl ? v > 0 : v < 0;
-
-    // "Forward boundary" = the half you reach LAST before leaving this image.
-    // LTR: right half is last → atForwardEnd when showRightHalf == true.
-    // RTL: left half is last → atForwardEnd when showRightHalf == false.
-    final atForwardEnd =
-        widget.isRtl ? !widget.showRightHalf : widget.showRightHalf;
-    final atBackwardEnd =
-        widget.isRtl ? widget.showRightHalf : !widget.showRightHalf;
-
-    if (goForward) {
-      atForwardEnd ? widget.onNext() : widget.onToggleHalf();
-    } else {
-      atBackwardEnd ? widget.onPrevious() : widget.onToggleHalf();
-    }
-  }
-
   // ── Build ──────────────────────────────────────────────────────────────────
 
   @override
@@ -518,22 +491,32 @@ class _AdaptivePageState extends State<_AdaptivePage> {
     );
   }
 
-  // Wide image: GestureDetector handles swipes; animated PageView shows halves.
-  // The inner PageView is purely for animation: physics = Never so it never
-  // intercepts gestures. When the parent flips showRightHalf, didUpdateWidget
-  // calls _halfController.animateToPage() to produce the slide transition.
+  // Wide image: inner PageView with PageScrollPhysics lets the half-pages
+  // track the finger during a drag, just like a normal page turn.
+  // Children are always [leftHalf, rightHalf] (page 0 / page 1).
+  // onPageChanged keeps the parent's showRightHalf in sync.
+  // At the boundary, OverscrollNotification fires with non-zero velocity;
+  // we map that to onNext/onPrevious on the outer controller.
+  //
+  // Velocity sign in a non-reversed horizontal PageView:
+  //   velocity > 0 → right boundary (user flung left)  → forward in LTR
+  //   velocity < 0 → left boundary  (user flung right) → forward in RTL
   Widget _buildWide(Size screen) {
-    final leftHalf = _halfPage(screen, rightHalf: false);
-    final rightHalf = _halfPage(screen, rightHalf: true);
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onHorizontalDragEnd: _handleSwipe,
+    return NotificationListener<OverscrollNotification>(
+      onNotification: (n) {
+        if (n.velocity.abs() < 100) return true;
+        final goForward = widget.isRtl ? n.velocity < 0 : n.velocity > 0;
+        goForward ? widget.onNext() : widget.onPrevious();
+        return true;
+      },
       child: PageView(
         controller: _halfController,
-        physics: const NeverScrollableScrollPhysics(),
-        // reverse mirrors the outer PageView so animation direction matches.
-        reverse: widget.isRtl,
-        children: widget.isRtl ? [rightHalf, leftHalf] : [leftHalf, rightHalf],
+        physics: const PageScrollPhysics(),
+        onPageChanged: (page) => widget.onHalfChanged(page == 1),
+        children: [
+          _halfPage(screen, rightHalf: false),
+          _halfPage(screen, rightHalf: true),
+        ],
       ),
     );
   }
