@@ -22,8 +22,14 @@ final coverUrlProvider =
   return url;
 });
 
+// Recursively follows the most-recently-updated subfolder at each level
+// until reaching a folder that contains images directly, then returns
+// the URL of the first image.  maxDepth prevents runaway API calls.
 Future<String?> _fetchCoverUrl(
-    ApiClient client, List<String> pathSegments) async {
+    ApiClient client, List<String> pathSegments,
+    {int maxDepth = 6}) async {
+  if (maxDepth <= 0) return null;
+
   final entries = await client.listFolder(pathSegments);
 
   final folders = entries
@@ -32,18 +38,18 @@ Future<String?> _fetchCoverUrl(
     ..sort((a, b) => b.updated.compareTo(a.updated)); // most recent first
 
   if (folders.isNotEmpty) {
-    final bookPath = [...pathSegments, folders.first.name];
-    final bookEntries = await client.listFolder(bookPath);
-    final images = bookEntries.where((e) => e.type == FileType.image).toList();
-    if (images.isNotEmpty) {
-      return client.imageUrl(bookPath, images.first.name);
-    }
+    final result = await _fetchCoverUrl(
+      client,
+      [...pathSegments, folders.first.name],
+      maxDepth: maxDepth - 1,
+    );
+    if (result != null) return result;
   }
 
-  // Fallback: images sitting directly in this folder
-  final directImages = entries.where((e) => e.type == FileType.image).toList();
-  if (directImages.isNotEmpty) {
-    return client.imageUrl(pathSegments, directImages.first.name);
+  // No subfolders (or they all returned null) → look for images here
+  final images = entries.where((e) => e.type == FileType.image).toList();
+  if (images.isNotEmpty) {
+    return client.imageUrl(pathSegments, images.first.name);
   }
 
   return null;
