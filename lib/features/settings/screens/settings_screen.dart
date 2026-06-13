@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/providers/settings_provider.dart';
+import '../../../core/providers/thumbnail_cache_provider.dart';
 
 class SettingsScreen extends ConsumerStatefulWidget {
   const SettingsScreen({super.key});
@@ -196,6 +197,21 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             onChanged: (v) =>
                 ref.read(autoNextBookProvider.notifier).set(v),
           ),
+
+          const SizedBox(height: 28),
+
+          // ── Thumbnail Cache ─────────────────────────────────────────
+          _SectionTitle('封面快取'),
+          const SizedBox(height: 8),
+          Text(
+            '封面縮圖的 URL 快取於本機資料庫，有效期 7 天，避免每次啟動重複查詢。',
+            style: Theme.of(context)
+                .textTheme
+                .bodySmall
+                ?.copyWith(color: Colors.grey),
+          ),
+          const SizedBox(height: 12),
+          _ClearCacheButton(),
         ],
       ),
     );
@@ -214,6 +230,61 @@ class _SectionTitle extends StatelessWidget {
           .textTheme
           .titleMedium
           ?.copyWith(fontWeight: FontWeight.w600),
+    );
+  }
+}
+
+class _ClearCacheButton extends ConsumerStatefulWidget {
+  @override
+  ConsumerState<_ClearCacheButton> createState() => _ClearCacheButtonState();
+}
+
+class _ClearCacheButtonState extends ConsumerState<_ClearCacheButton> {
+  int? _count;
+  bool _clearing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadCount();
+  }
+
+  Future<void> _loadCount() async {
+    final count = await ref
+        .read(thumbnailCacheServiceProvider)
+        .getCount();
+    if (mounted) setState(() => _count = count);
+  }
+
+  Future<void> _clear() async {
+    setState(() => _clearing = true);
+    await ref.read(thumbnailCacheServiceProvider).clearAll();
+    if (mounted) {
+      setState(() {
+        _count = 0;
+        _clearing = false;
+      });
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('封面快取已清除')));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final label = _count == null ? '清除封面快取' : '清除封面快取（$_count 筆）';
+    return SizedBox(
+      width: double.infinity,
+      child: OutlinedButton.icon(
+        onPressed: _clearing ? null : _clear,
+        icon: _clearing
+            ? const SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            : const Icon(Icons.delete_sweep_outlined),
+        label: Text(label),
+      ),
     );
   }
 }
