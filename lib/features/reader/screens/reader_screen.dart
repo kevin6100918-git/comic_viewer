@@ -334,12 +334,13 @@ class _PageReaderState extends ConsumerState<_PageReader> {
   }
 
   Widget _buildBottomBar(BuildContext context, bool hasBookmark) {
-    return ClipRect(
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        curve: Curves.easeOut,
-        height: _barHeight,
-        color: Colors.black54,
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 200),
+      curve: Curves.easeOut,
+      height: _barHeight,
+      color: Colors.black54,
+      child: SingleChildScrollView(
+        physics: const NeverScrollableScrollPhysics(),
         child: Column(
           children: [
             // ── Handle ──
@@ -386,7 +387,6 @@ class _PageReaderState extends ConsumerState<_PageReader> {
     );
   }
 }
-
 // ── _AdaptivePage ─────────────────────────────────────────────────────────────
 //
 // Detects image aspect ratio after load, then renders accordingly:
