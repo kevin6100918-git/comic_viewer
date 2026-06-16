@@ -97,7 +97,7 @@ class _PageReaderState extends ConsumerState<_PageReader> {
   static const double _kBarHandleHeight = 28.0;
   static const double _kFilmStripHeight = 102.0;
   static const double _kBarContentHeight = 60.0;
-  static const double _kThumbItemExtent = 56.0;
+  static const double _kThumbItemExtent = 71.0;
   double get _barHeight => _barExpanded
       ? _kBarHandleHeight + _kFilmStripHeight + _kBarContentHeight
       : _kBarHandleHeight;
@@ -475,7 +475,7 @@ class _PageReaderState extends ConsumerState<_PageReader> {
                           borderRadius: BorderRadius.circular(2),
                           child: CachedNetworkImage(
                             imageUrl: url,
-                            fit: BoxFit.cover,
+                            fit: BoxFit.contain,
                             placeholder: (_, _) =>
                                 ColoredBox(color: Colors.grey.shade800),
                             errorWidget: (_, _, _) => ColoredBox(
