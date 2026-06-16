@@ -89,6 +89,13 @@ class _PageReaderState extends ConsumerState<_PageReader> {
   String? _nextBookTitle;
   bool _nextNavPending = false;
 
+  bool _barExpanded = false;
+
+  static const double _kBarHandleHeight = 28.0;
+  static const double _kBarContentHeight = 60.0;
+  double get _barHeight =>
+      _barExpanded ? _kBarHandleHeight + _kBarContentHeight : _kBarHandleHeight;
+
   String get _bookId => widget.pathSegments.join('/');
   List<String> get _parentPath =>
       widget.pathSegments.sublist(0, widget.pathSegments.length - 1);
@@ -190,6 +197,8 @@ class _PageReaderState extends ConsumerState<_PageReader> {
       ),
     ));
   }
+
+  void _toggleBar() => setState(() => _barExpanded = !_barExpanded);
 
   // ── Progress / bookmark ────────────────────────────────────────────────────
 
@@ -293,8 +302,10 @@ class _PageReaderState extends ConsumerState<_PageReader> {
           },
         ),
         if (_currentPage < widget.images.length)
-          Positioned(
-            bottom: 16,
+          AnimatedPositioned(
+            duration: const Duration(milliseconds: 200),
+            curve: Curves.easeOut,
+            bottom: _barHeight + 8,
             left: 0,
             right: 0,
             child: Center(
@@ -313,26 +324,69 @@ class _PageReaderState extends ConsumerState<_PageReader> {
             ),
           ),
         Positioned(
-          bottom: 12,
-          right: 16,
-          child: FloatingActionButton.small(
-            heroTag: 'bookmark_fab',
-            tooltip: hasBookmark ? '移除書籤' : '加入書籤',
-            backgroundColor:
-                hasBookmark ? Theme.of(context).colorScheme.primary : null,
-            foregroundColor:
-                hasBookmark ? Theme.of(context).colorScheme.onPrimary : null,
-            onPressed: _toggleBookmark,
-            child: Icon(
-              hasBookmark ? Icons.bookmark : Icons.bookmark_border,
-            ),
-          ),
+          bottom: 0,
+          left: 0,
+          right: 0,
+          child: _buildBottomBar(context, hasBookmark),
         ),
       ],
     );
   }
-}
 
+  Widget _buildBottomBar(BuildContext context, bool hasBookmark) {
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 200),
+      curve: Curves.easeOut,
+      height: _barHeight,
+      color: Colors.black54,
+      child: SingleChildScrollView(
+        physics: const NeverScrollableScrollPhysics(),
+        child: Column(
+          children: [
+            // ── Handle ──
+            GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: _toggleBar,
+              child: SizedBox(
+                height: _kBarHandleHeight,
+                child: Center(
+                  child: AnimatedRotation(
+                    duration: const Duration(milliseconds: 200),
+                    turns: _barExpanded ? 0.5 : 0.0,
+                    child: const Icon(
+                      Icons.expand_less,
+                      color: Colors.white70,
+                      size: 20,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            // ── Controls ──
+            SizedBox(
+              height: _kBarContentHeight,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  IconButton(
+                    icon: Icon(
+                      hasBookmark ? Icons.bookmark : Icons.bookmark_border,
+                    ),
+                    color: hasBookmark
+                        ? Theme.of(context).colorScheme.primary
+                        : Colors.white,
+                    tooltip: hasBookmark ? '移除書籤' : '加入書籤',
+                    onPressed: _toggleBookmark,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
 // ── _AdaptivePage ─────────────────────────────────────────────────────────────
 //
 // Detects image aspect ratio after load, then renders accordingly:
