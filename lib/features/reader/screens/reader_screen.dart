@@ -95,9 +95,9 @@ class _PageReaderState extends ConsumerState<_PageReader> {
   late final ScrollController _filmStripController;
 
   static const double _kBarHandleHeight = 28.0;
-  static const double _kFilmStripHeight = 102.0;
+  static const double _kFilmStripHeight = 212.0;
   static const double _kBarContentHeight = 60.0;
-  static const double _kThumbItemExtent = 71.0;
+  static const double _kThumbItemExtent = 148.0;
   double get _barHeight => _barExpanded
       ? _kBarHandleHeight + _kFilmStripHeight + _kBarContentHeight
       : _kBarHandleHeight;
