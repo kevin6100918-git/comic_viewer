@@ -10,7 +10,9 @@
       "Bash(git diff *)",
       "Bash(git log *)",
       "Bash(git status *)",
-      "PowerShell(git checkout -b feature/thumbnail-cache)",
+      "PowerShell(git checkout *)",
+      "PowerShell(git pull *)",
+      "PowerShell(git stash *)",
       "PowerShell(flutter pub get 2>&1)"
     ]
   }
