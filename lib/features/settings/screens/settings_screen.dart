@@ -41,6 +41,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final colorIndex = ref.watch(themeColorIndexProvider);
     final isRtl = ref.watch(readingRtlProvider);
     final autoNext = ref.watch(autoNextBookProvider);
+    final autoplayInterval = ref.watch(autoplayIntervalProvider);
+    final autoplaySpeed = ref.watch(autoplaySpeedProvider);
 
     return Scaffold(
       appBar: AppBar(title: const Text('設定')),
@@ -196,6 +198,62 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             value: autoNext,
             onChanged: (v) =>
                 ref.read(autoNextBookProvider.notifier).set(v),
+          ),
+
+          const SizedBox(height: 28),
+
+          // ── Autoplay ────────────────────────────────────────────────
+          _SectionTitle('自動播放'),
+          const SizedBox(height: 4),
+          Row(
+            children: [
+              const Text('換頁間隔'),
+              Expanded(
+                child: Slider(
+                  min: 1,
+                  max: 10,
+                  divisions: 9,
+                  value: autoplayInterval.toDouble(),
+                  label: '$autoplayInterval 秒',
+                  onChanged: (v) => ref
+                      .read(autoplayIntervalProvider.notifier)
+                      .set(v.round()),
+                ),
+              ),
+              SizedBox(
+                width: 44,
+                child: Text(
+                  '$autoplayInterval 秒',
+                  textAlign: TextAlign.end,
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ),
+            ],
+          ),
+          Row(
+            children: [
+              const Text('動畫速度'),
+              Expanded(
+                child: Slider(
+                  min: 100,
+                  max: 1000,
+                  divisions: 9,
+                  value: autoplaySpeed.toDouble(),
+                  label: '${autoplaySpeed}ms',
+                  onChanged: (v) => ref
+                      .read(autoplaySpeedProvider.notifier)
+                      .set((v / 100).round() * 100),
+                ),
+              ),
+              SizedBox(
+                width: 52,
+                child: Text(
+                  '${autoplaySpeed}ms',
+                  textAlign: TextAlign.end,
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ),
+            ],
           ),
 
           const SizedBox(height: 28),
