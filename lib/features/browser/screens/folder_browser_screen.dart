@@ -26,6 +26,25 @@ class FolderBrowserScreen extends ConsumerStatefulWidget {
 
 class _FolderBrowserScreenState extends ConsumerState<FolderBrowserScreen> {
   bool _navigating = false;
+  bool _isSearching = false;
+  final _searchController = TextEditingController();
+  String _searchQuery = '';
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  void _toggleSearch() {
+    setState(() {
+      _isSearching = !_isSearching;
+      if (!_isSearching) {
+        _searchController.clear();
+        _searchQuery = '';
+      }
+    });
+  }
 
   Future<void> _onFolderTap(FileEntry entry) async {
     if (_navigating) return;
@@ -89,13 +108,36 @@ class _FolderBrowserScreenState extends ConsumerState<FolderBrowserScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(widget.title),
+        title: _isSearching
+            ? TextField(
+                controller: _searchController,
+                autofocus: true,
+                decoration: const InputDecoration(
+                  hintText: '搜尋...',
+                  border: InputBorder.none,
+                ),
+                onChanged: (v) => setState(() => _searchQuery = v),
+              )
+            : Text(widget.title),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.sort),
-            tooltip: '排序',
-            onPressed: _showSortSheet,
-          ),
+          if (_isSearching)
+            IconButton(
+              icon: const Icon(Icons.close),
+              tooltip: '關閉搜尋',
+              onPressed: _toggleSearch,
+            )
+          else ...[
+            IconButton(
+              icon: const Icon(Icons.search),
+              tooltip: '搜尋',
+              onPressed: _toggleSearch,
+            ),
+            IconButton(
+              icon: const Icon(Icons.sort),
+              tooltip: '排序',
+              onPressed: _showSortSheet,
+            ),
+          ],
         ],
       ),
       drawer: const AppDrawer(),
@@ -103,10 +145,20 @@ class _FolderBrowserScreenState extends ConsumerState<FolderBrowserScreen> {
         children: [
           folderAsync.when(
             data: (entries) {
-              final folders =
+              final allFolders =
                   entries.where((e) => e.type == FileType.folder).toList();
-              if (folders.isEmpty) {
+              final folders = _searchQuery.isEmpty
+                  ? allFolders
+                  : allFolders
+                      .where((e) => e.name
+                          .toLowerCase()
+                          .contains(_searchQuery.toLowerCase()))
+                      .toList();
+              if (allFolders.isEmpty) {
                 return const Center(child: Text('沒有找到任何資料夾'));
+              }
+              if (folders.isEmpty) {
+                return const Center(child: Text('沒有符合的結果'));
               }
               return GridView.builder(
                 padding: const EdgeInsets.all(12),
