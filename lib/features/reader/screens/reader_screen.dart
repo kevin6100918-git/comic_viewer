@@ -90,6 +90,8 @@ class _PageReaderState extends ConsumerState<_PageReader> {
   bool _nextNavPending = false;
 
   bool _barExpanded = false;
+  bool _autoplayActive = false;
+  Timer? _autoplayTimer;
 
   static const double _kBarHandleHeight = 28.0;
   static const double _kBarContentHeight = 60.0;
@@ -113,6 +115,7 @@ class _PageReaderState extends ConsumerState<_PageReader> {
 
   @override
   void dispose() {
+    _autoplayTimer?.cancel();
     _controller.dispose();
     super.dispose();
   }
@@ -143,6 +146,7 @@ class _PageReaderState extends ConsumerState<_PageReader> {
 
   void _onPageChanged(int index) {
     if (index >= widget.images.length) {
+      _stopAutoplay();
       if (!_nextNavPending) {
         _nextNavPending = true;
         WidgetsBinding.instance
@@ -199,6 +203,48 @@ class _PageReaderState extends ConsumerState<_PageReader> {
   }
 
   void _toggleBar() => setState(() => _barExpanded = !_barExpanded);
+
+  // ── Autoplay ───────────────────────────────────────────────────────────────
+
+  void _startAutoplay() {
+    final interval = ref.read(autoplayIntervalProvider);
+    final speed = ref.read(autoplaySpeedProvider);
+    _autoplayTimer?.cancel();
+    _autoplayTimer = Timer.periodic(
+      Duration(seconds: interval),
+      (_) => _advancePage(speed),
+    );
+    setState(() => _autoplayActive = true);
+  }
+
+  void _stopAutoplay() {
+    _autoplayTimer?.cancel();
+    _autoplayTimer = null;
+    if (mounted) setState(() => _autoplayActive = false);
+  }
+
+  void _toggleAutoplay() =>
+      _autoplayActive ? _stopAutoplay() : _startAutoplay();
+
+  void _advancePage(int speedMs) {
+    if (!mounted) return;
+    final mode = _modes[_currentPage] ?? _PageMode.normal;
+    if (mode == _PageMode.wide) {
+      final isRtl = ref.read(readingRtlProvider);
+      final showRight = _rightHalf[_currentPage] ?? isRtl;
+      // In RTL, right half is read first; in LTR, left half is read first.
+      // "At last half" means we should advance to the next page.
+      final atLastHalf = isRtl ? !showRight : showRight;
+      if (!atLastHalf) {
+        setState(() => _rightHalf[_currentPage] = !showRight);
+        return;
+      }
+    }
+    _controller.nextPage(
+      duration: Duration(milliseconds: speedMs),
+      curve: Curves.easeOut,
+    );
+  }
 
   // ── Progress / bookmark ────────────────────────────────────────────────────
 
@@ -327,13 +373,13 @@ class _PageReaderState extends ConsumerState<_PageReader> {
           bottom: 0,
           left: 0,
           right: 0,
-          child: _buildBottomBar(context, hasBookmark),
+          child: _buildBottomBar(context, hasBookmark, _autoplayActive),
         ),
       ],
     );
   }
 
-  Widget _buildBottomBar(BuildContext context, bool hasBookmark) {
+  Widget _buildBottomBar(BuildContext context, bool hasBookmark, bool autoplayActive) {
     return AnimatedContainer(
       duration: const Duration(milliseconds: 200),
       curve: Curves.easeOut,
@@ -377,6 +423,19 @@ class _PageReaderState extends ConsumerState<_PageReader> {
                         : Colors.white,
                     tooltip: hasBookmark ? '移除書籤' : '加入書籤',
                     onPressed: _toggleBookmark,
+                  ),
+                  const SizedBox(width: 16),
+                  IconButton(
+                    icon: Icon(
+                      autoplayActive
+                          ? Icons.pause_circle_outline
+                          : Icons.play_circle_outline,
+                    ),
+                    color: autoplayActive
+                        ? Theme.of(context).colorScheme.primary
+                        : Colors.white,
+                    tooltip: autoplayActive ? '停止自動播放' : '自動播放',
+                    onPressed: _toggleAutoplay,
                   ),
                 ],
               ),

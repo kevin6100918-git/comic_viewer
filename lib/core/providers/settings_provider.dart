@@ -141,6 +141,41 @@ final autoNextBookProvider =
   return AutoNextBookNotifier(prefs);
 });
 
+// ── Autoplay Settings ─────────────────────────────────────────────────────────
+
+const _kAutoplayIntervalKey = 'autoplay_interval';
+const _kAutoplaySpeedKey = 'autoplay_speed';
+
+class AutoplayIntervalNotifier extends StateNotifier<int> {
+  final SharedPreferences _prefs;
+  AutoplayIntervalNotifier(this._prefs)
+      : super(_prefs.getInt(_kAutoplayIntervalKey) ?? 3);
+  Future<void> set(int seconds) async {
+    state = seconds.clamp(1, 10);
+    await _prefs.setInt(_kAutoplayIntervalKey, state);
+  }
+}
+
+final autoplayIntervalProvider =
+    StateNotifierProvider<AutoplayIntervalNotifier, int>((ref) {
+  return AutoplayIntervalNotifier(ref.watch(sharedPreferencesProvider));
+});
+
+class AutoplaySpeedNotifier extends StateNotifier<int> {
+  final SharedPreferences _prefs;
+  AutoplaySpeedNotifier(this._prefs)
+      : super(_prefs.getInt(_kAutoplaySpeedKey) ?? 300);
+  Future<void> set(int ms) async {
+    state = ms.clamp(100, 1000);
+    await _prefs.setInt(_kAutoplaySpeedKey, state);
+  }
+}
+
+final autoplaySpeedProvider =
+    StateNotifierProvider<AutoplaySpeedNotifier, int>((ref) {
+  return AutoplaySpeedNotifier(ref.watch(sharedPreferencesProvider));
+});
+
 // ── Sort Settings ─────────────────────────────────────────────────────────────
 
 class SortSettings {
