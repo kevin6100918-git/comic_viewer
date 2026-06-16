@@ -92,11 +92,15 @@ class _PageReaderState extends ConsumerState<_PageReader> {
   bool _barExpanded = false;
   bool _autoplayActive = false;
   Timer? _autoplayTimer;
+  late final ScrollController _filmStripController;
 
   static const double _kBarHandleHeight = 28.0;
+  static const double _kFilmStripHeight = 72.0;
   static const double _kBarContentHeight = 60.0;
-  double get _barHeight =>
-      _barExpanded ? _kBarHandleHeight + _kBarContentHeight : _kBarHandleHeight;
+  static const double _kThumbItemExtent = 56.0;
+  double get _barHeight => _barExpanded
+      ? _kBarHandleHeight + _kFilmStripHeight + _kBarContentHeight
+      : _kBarHandleHeight;
 
   String get _bookId => widget.pathSegments.join('/');
   List<String> get _parentPath =>
@@ -107,6 +111,7 @@ class _PageReaderState extends ConsumerState<_PageReader> {
     super.initState();
     _currentPage = widget.initialPage;
     _controller = PageController(initialPage: _currentPage);
+    _filmStripController = ScrollController();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _saveProgress();
       _loadNextBookPath();
@@ -117,6 +122,7 @@ class _PageReaderState extends ConsumerState<_PageReader> {
   void dispose() {
     _autoplayTimer?.cancel();
     _controller.dispose();
+    _filmStripController.dispose();
     super.dispose();
   }
 
@@ -157,6 +163,7 @@ class _PageReaderState extends ConsumerState<_PageReader> {
     setState(() => _currentPage = index);
     _saveProgress();
     _preloadAdjacent(index);
+    if (_barExpanded) _scrollFilmStripToPage(index);
   }
 
   void _preloadAdjacent(int page) {
@@ -202,7 +209,31 @@ class _PageReaderState extends ConsumerState<_PageReader> {
     ));
   }
 
-  void _toggleBar() => setState(() => _barExpanded = !_barExpanded);
+  void _toggleBar() {
+    setState(() => _barExpanded = !_barExpanded);
+    if (_barExpanded) {
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => _scrollFilmStripToPage(_currentPage, animate: false),
+      );
+    }
+  }
+
+  void _scrollFilmStripToPage(int page, {bool animate = true}) {
+    if (!_filmStripController.hasClients) return;
+    final pos = _filmStripController.position;
+    final viewportWidth = pos.viewportDimension;
+    final target = (page * _kThumbItemExtent - (viewportWidth / 2 - _kThumbItemExtent / 2))
+        .clamp(0.0, pos.maxScrollExtent);
+    if (animate) {
+      _filmStripController.animateTo(
+        target,
+        duration: const Duration(milliseconds: 200),
+        curve: Curves.easeOut,
+      );
+    } else {
+      _filmStripController.jumpTo(target);
+    }
+  }
 
   // ── Autoplay ───────────────────────────────────────────────────────────────
 
@@ -380,6 +411,7 @@ class _PageReaderState extends ConsumerState<_PageReader> {
   }
 
   Widget _buildBottomBar(BuildContext context, bool hasBookmark, bool autoplayActive) {
+    final client = ref.read(apiClientProvider);
     return AnimatedContainer(
       duration: const Duration(milliseconds: 200),
       curve: Curves.easeOut,
@@ -406,6 +438,60 @@ class _PageReaderState extends ConsumerState<_PageReader> {
                     ),
                   ),
                 ),
+              ),
+            ),
+            // ── Film Strip ──
+            SizedBox(
+              height: _kFilmStripHeight,
+              child: ListView.builder(
+                controller: _filmStripController,
+                scrollDirection: Axis.horizontal,
+                itemCount: widget.images.length,
+                itemExtent: _kThumbItemExtent,
+                itemBuilder: (context, index) {
+                  final isActive = index == _currentPage;
+                  final url = client.imageUrl(
+                    widget.pathSegments,
+                    widget.images[index].name,
+                  );
+                  return GestureDetector(
+                    onTap: () => _controller.jumpToPage(index),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 4,
+                        vertical: 6,
+                      ),
+                      child: Container(
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(3),
+                          border: Border.all(
+                            color: isActive
+                                ? Theme.of(context).colorScheme.primary
+                                : Colors.transparent,
+                            width: 2,
+                          ),
+                        ),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(2),
+                          child: CachedNetworkImage(
+                            imageUrl: url,
+                            fit: BoxFit.cover,
+                            placeholder: (_, _) =>
+                                ColoredBox(color: Colors.grey.shade800),
+                            errorWidget: (_, _, _) => ColoredBox(
+                              color: Colors.grey.shade800,
+                              child: const Icon(
+                                Icons.broken_image_outlined,
+                                size: 16,
+                                color: Colors.grey,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  );
+                },
               ),
             ),
             // ── Controls ──
