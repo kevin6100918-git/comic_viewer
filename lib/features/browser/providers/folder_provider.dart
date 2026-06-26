@@ -14,19 +14,25 @@ List<FileEntry> _sorted(List<FileEntry> entries, SortSettings sort) {
   return result;
 }
 
-// Used by FolderBrowserScreen — respects user sort settings.
-final folderProvider =
-    FutureProvider.family<List<FileEntry>, List<String>>((ref, pathSegments) async {
+// Raw fetch — only re-runs when path or server changes, NOT when sort changes.
+final _rawFolderProvider =
+    FutureProvider.family<List<FileEntry>, List<String>>((ref, pathSegments) {
   final client = ref.watch(apiClientProvider);
-  final sort = ref.watch(sortProvider);
-  final entries = await client.listFolder(pathSegments);
-  return _sorted(entries, sort);
+  return client.listFolder(pathSegments);
 });
 
-// Used by ReaderScreen — always name ASC so page order is stable.
+// Sorted view — re-computes on sort change without re-fetching.
+final folderProvider = Provider.family<AsyncValue<List<FileEntry>>, List<String>>(
+  (ref, pathSegments) {
+    final rawAsync = ref.watch(_rawFolderProvider(pathSegments));
+    final sort = ref.watch(sortProvider);
+    return rawAsync.whenData((entries) => _sorted(entries, sort));
+  },
+);
+
+// Used by ReaderScreen — always name ASC; reuses _rawFolderProvider cache.
 final readerFolderProvider =
-    FutureProvider.family<List<FileEntry>, List<String>>((ref, pathSegments) async {
-  final client = ref.watch(apiClientProvider);
-  final entries = await client.listFolder(pathSegments);
-  return _sorted(entries, const SortSettings());
+    Provider.family<AsyncValue<List<FileEntry>>, List<String>>((ref, pathSegments) {
+  final rawAsync = ref.watch(_rawFolderProvider(pathSegments));
+  return rawAsync.whenData((entries) => _sorted(entries, const SortSettings()));
 });
