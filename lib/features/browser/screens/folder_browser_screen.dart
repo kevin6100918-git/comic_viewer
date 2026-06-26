@@ -53,12 +53,7 @@ class _FolderBrowserScreenState extends ConsumerState<FolderBrowserScreen> {
     final childPath = [...widget.pathSegments, entry.name];
     try {
       final client = ref.read(apiClientProvider);
-      final sort = ref.read(sortProvider);
-      final entries = await client.listFolder(
-        childPath,
-        sortingVote: sort.vote,
-        sortingMethod: sort.method,
-      );
+      final entries = await client.listFolder(childPath);
 
       if (!mounted) return;
 

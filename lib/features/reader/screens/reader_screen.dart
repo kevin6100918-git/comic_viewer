@@ -131,7 +131,7 @@ class _PageReaderState extends ConsumerState<_PageReader> {
   Future<void> _loadNextBookPath() async {
     if (_parentPath.isEmpty) return;
     try {
-      final entries = await ref.read(folderProvider(_parentPath).future);
+      final entries = await ref.read(apiClientProvider).listFolder(_parentPath);
       final folders =
           entries.where((e) => e.type == FileType.folder).toList();
       final idx =
