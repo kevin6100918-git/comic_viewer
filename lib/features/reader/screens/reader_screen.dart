@@ -1,8 +1,13 @@
 import 'dart:async';
+import 'dart:math' as math;
+import 'dart:typed_data';
 
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter/foundation.dart' show compute;
 import 'package:flutter/material.dart';
+import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:image/image.dart' as img;
 import '../../../core/models/bookmark_entry.dart';
 import '../../../core/models/file_entry.dart';
 import '../../../core/models/reading_progress.dart';
@@ -674,20 +679,7 @@ class _AdaptivePageState extends State<_AdaptivePage> {
   }
 
   Widget _buildTall(Size screen) {
-    return SingleChildScrollView(
-      physics: const ClampingScrollPhysics(),
-      child: CachedNetworkImage(
-        imageUrl: widget.imageUrl,
-        width: screen.width,
-        fit: BoxFit.fitWidth,
-        placeholder: (_, _) =>
-            const Center(child: CircularProgressIndicator()),
-        errorWidget: (_, _, _) => const Center(
-          child: Icon(Icons.broken_image_outlined,
-              size: 64, color: Colors.grey),
-        ),
-      ),
-    );
+    return _TallImage(imageUrl: widget.imageUrl, screenWidth: screen.width);
   }
 
   // Wide image: GestureDetector drives the inner PageView manually so that
@@ -786,6 +778,90 @@ class _AdaptivePageState extends State<_AdaptivePage> {
           ),
         ),
       ),
+    );
+  }
+}
+
+// ── _TallImage ────────────────────────────────────────────────────────────────
+//
+// Very tall "long strip" scans can exceed the ~32766px single-dimension limit
+// that Android/Skia impose on a single rendered bitmap/texture; painting the
+// whole image in one CachedNetworkImage causes it to be squashed/distorted.
+// To avoid that, tall pages are always sliced into shorter chunks (well under
+// the limit) before anything is handed to Flutter's normal image pipeline, so
+// no single texture is ever oversized regardless of the source image's height.
+
+const int _kTallSliceMaxHeight = 4096;
+
+List<Uint8List> _sliceTallImageBytes(Uint8List bytes) {
+  final decoded = img.decodeImage(bytes);
+  if (decoded == null) return [];
+  final slices = <Uint8List>[];
+  var y = 0;
+  while (y < decoded.height) {
+    final h = math.min(_kTallSliceMaxHeight, decoded.height - y);
+    final crop = img.copyCrop(decoded, x: 0, y: y, width: decoded.width, height: h);
+    slices.add(Uint8List.fromList(img.encodePng(crop)));
+    y += h;
+  }
+  return slices;
+}
+
+class _TallImage extends StatefulWidget {
+  final String imageUrl;
+  final double screenWidth;
+
+  const _TallImage({required this.imageUrl, required this.screenWidth});
+
+  @override
+  State<_TallImage> createState() => _TallImageState();
+}
+
+class _TallImageState extends State<_TallImage> {
+  late final Future<List<Uint8List>> _slicesFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _slicesFuture = _load();
+  }
+
+  Future<List<Uint8List>> _load() async {
+    final file = await DefaultCacheManager().getSingleFile(widget.imageUrl);
+    final bytes = await file.readAsBytes();
+    return compute(_sliceTallImageBytes, bytes);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<List<Uint8List>>(
+      future: _slicesFuture,
+      builder: (context, snapshot) {
+        if (snapshot.hasError ||
+            (snapshot.connectionState == ConnectionState.done &&
+                (snapshot.data?.isEmpty ?? true))) {
+          return const Center(
+            child: Icon(Icons.broken_image_outlined,
+                size: 64, color: Colors.grey),
+          );
+        }
+        if (!snapshot.hasData) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        return SingleChildScrollView(
+          physics: const ClampingScrollPhysics(),
+          child: Column(
+            children: [
+              for (final slice in snapshot.data!)
+                Image.memory(
+                  slice,
+                  width: widget.screenWidth,
+                  fit: BoxFit.fitWidth,
+                ),
+            ],
+          ),
+        );
+      },
     );
   }
 }
