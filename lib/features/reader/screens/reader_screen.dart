@@ -99,6 +99,9 @@ class _PageReaderState extends ConsumerState<_PageReader> {
   Timer? _autoplayTimer;
   late final ScrollController _filmStripController;
 
+  bool _disposed = false;
+  static const int _kPreloadConcurrency = 6;
+
   static const double _kBarHandleHeight = 28.0;
   static const double _kFilmStripHeight = 212.0;
   static const double _kBarContentHeight = 60.0;
@@ -121,10 +124,12 @@ class _PageReaderState extends ConsumerState<_PageReader> {
       _saveProgress();
       _loadNextBookPath();
     });
+    _preloadAllPages();
   }
 
   @override
   void dispose() {
+    _disposed = true;
     _autoplayTimer?.cancel();
     _controller.dispose();
     _filmStripController.dispose();
@@ -186,6 +191,50 @@ class _PageReaderState extends ConsumerState<_PageReader> {
         );
       }
     }
+  }
+
+  // ── Full-book background preload ──────────────────────────────────────────
+  //
+  // Fetches every page's raw bytes into flutter_cache_manager's disk cache
+  // (the same cache CachedNetworkImage reads from) so slow-to-respond pages
+  // are already downloaded by the time the user swipes to them. Ordered by
+  // distance from the starting page so nearby pages land first even though
+  // downloads are bounded to a small concurrency to avoid hammering the NAS.
+  Future<void> _preloadAllPages() async {
+    final client = ref.read(apiClientProvider);
+    final cacheManager = DefaultCacheManager();
+    final order = _preloadOrder(_currentPage, widget.images.length);
+    var next = 0;
+
+    Future<void> worker() async {
+      while (!_disposed && next < order.length) {
+        final idx = order[next++];
+        final url =
+            client.imageUrl(widget.pathSegments, widget.images[idx].name);
+        try {
+          await cacheManager.getSingleFile(url);
+        } catch (_) {
+          // Ignore; the page will just fall back to a live request on view.
+        }
+      }
+    }
+
+    await Future.wait(
+      List.generate(_kPreloadConcurrency, (_) => worker()),
+    );
+  }
+
+  // Page indices ordered outward from [start]: start, start+1, start-1,
+  // start+2, start-2, ...
+  List<int> _preloadOrder(int start, int length) {
+    final order = <int>[start];
+    for (var offset = 1; order.length < length; offset++) {
+      final forward = start + offset;
+      final backward = start - offset;
+      if (forward < length) order.add(forward);
+      if (backward >= 0) order.add(backward);
+    }
+    return order;
   }
 
   // ── Wide-image half control ────────────────────────────────────────────────
